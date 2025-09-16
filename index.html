@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
 <meta name="theme-color" content="#0078d7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 
 <!-- ✅ Added for PWA -->
 <link rel="manifest" href="./manifest.json">
@@ -375,7 +377,19 @@ document.addEventListener("keydown", function(e){
 <!-- ✅ Added Service Worker Registration -->
 <script>
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js")
+  navigator.serviceWorker.register("./sw.js").then(reg => {
+    console.log("✅ Service Worker registered");
+    reg.onupdatefound = () => {
+      const newWorker = reg.installing;
+      newWorker.onstatechange = () => {
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          if (confirm("🔄 May bagong update. Gusto mo bang i-refresh?")) {
+            window.location.reload();
+          }
+        }
+      };
+    };
+  })
     .then(() => console.log("✅ Service Worker registered"))
     .catch(err => console.error("❌ Service Worker failed:", err));
 }

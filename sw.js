@@ -1,5 +1,5 @@
-const CACHE_NAME = "shelter-locator-v1";
-const urlsToCache = [
+const CACHE_NAME = "shelter-locator-v2";
+const STATIC_ASSETS = [
   "index.html",
   "manifest.json",
   "icon-192.png",
@@ -14,15 +14,7 @@ const urlsToCache = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      for (const url of urlsToCache) {
-        try {
-          await cache.add(url);
-        } catch (err) {
-          console.warn("⚠️ Failed to cache:", url, err);
-        }
-      }
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
 
@@ -34,13 +26,22 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Network-first for index.html & firebase, cache-first for assets
 self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    caches.match(event.request).then((response) =>
-      response || fetch(event.request)
-    )
-  );
+  const url = event.request.url;
+  if (url.includes("index.html") || url.includes("firebase")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((res) => {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return res;
+        })
+        .catch(() => caches.match(event.request))
+    );
+  } else {
+    event.respondWith(
+      caches.match(event.request).then((res) => res || fetch(event.request))
+    );
+  }
 });
-
-
-
