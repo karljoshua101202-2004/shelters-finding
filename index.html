@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shelter Locator — San Mateo, Isabela</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
+<meta name="theme-color" content="#0078d7">
+
+<!-- ✅ Added for PWA -->
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+
+<style>
+html,body {height:100%; margin:0; font-family:Arial, sans-serif;}
+#map {height:100vh; width:100%;}
+#controlToggle {position:absolute; bottom:10px; left:10px; z-index:1000; width:40px; height:40px; border-radius:50%; background:#fff; display:flex; justify-content:center; align-items:center; box-shadow:0 1px 8px rgba(0,0,0,0.3); cursor:pointer;}
+#controlPanel {position:absolute; bottom:60px; left:10px; z-index:1000; background:white; padding:10px; border-radius:8px; width:260px; box-shadow:0 1px 8px rgba(0,0,0,0.3); display:none;}
+#controlPanel select, #controlPanel button {width:100%; margin-top:5px; padding:5px;}
+
+/* 🔑 Admin Panel */
+#adminPanel {display:none; position:absolute; top:20px; right:20px; z-index:2000; background:#fff; padding:15px; border-radius:12px; width:300px; box-shadow:0 4px 12px rgba(0,0,0,0.2);}
+#adminPanel h3 {margin-top:0; text-align:center;}
+#adminPanel input, #adminPanel select, #adminPanel button {width:100%; margin:5px 0; padding:6px; font-size:13px;}
+#loginBtn, #addShelterBtn, .saveBtn {background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer;}
+#logoutBtn {background:#ff4757; color:#fff; border:none; border-radius:6px; cursor:pointer;}
+#deleteShelterBtn {background:#ffa502; color:#fff;}
+#forgotBtn {background:#6c5ce7; color:#fff;}
+#seedBtn {background:#34c759; color:#fff;}
+table {width:100%; border-collapse:collapse; margin-top:10px;}
+th,td {border:1px solid #ddd; padding:6px; text-align:center; font-size:12px;}
+th {background:#f1f1f1;}
+
+/* 👮 Officials Panel */
+#officialPanel {display:none; position:absolute; top:20px; left:20px; z-index:2000; background:#fff; padding:15px; border-radius:12px; width:280px; box-shadow:0 4px 12px rgba(0,0,0,0.2);}
+#officialPanel h3 {margin-top:0; text-align:center;}
+#officialPanel input, #officialPanel select, #officialPanel button {width:100%; margin:5px 0; padding:6px; font-size:13px;}
+#officialLoginBtn {background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer;}
+#officialLogoutBtn {background:#ff4757; color:#fff; border:none; border-radius:6px; cursor:pointer;}
+#saveStatusBtn {background:#34c759; color:#fff; border:none; border-radius:6px; cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="controlToggle">⋮</div>
+<div id="controlPanel">
+  <button id="locateBtn">Show My Location</button>
+  <select id="destination"><option value="">Select Shelter</option></select>
+  <button id="routeBtn">Route to Shelter (Realtime)</button>
+</div>
+
+<!-- 🔑 Admin Panel -->
+<div id="adminPanel">
+  <h3>Admin Login</h3>
+  <input type="text" id="adminUser" placeholder="Admin email">
+  <input type="password" id="adminPass" placeholder="Password">
+  <button id="loginBtn">Login</button>
+  <button id="forgotBtn">Forgot password?</button>
+  <button id="logoutBtn" style="display:none;">Logout</button>
+
+  <div id="shelterForm" style="display:none;">
+    <h4>Manage Shelters</h4>
+    <input type="text" id="shelterName" placeholder="Shelter Name">
+    <input type="text" id="shelterLat" placeholder="Latitude">
+    <input type="text" id="shelterLng" placeholder="Longitude">
+    <input type="text" id="shelterCap" placeholder="Capacity (e.g. 1-100)">
+    <button id="addShelterBtn">Add / Update Shelter</button>
+
+    <h4>Edit / Delete</h4>
+    <select id="deleteShelterSelect"><option value="">-- Select Shelter --</option></select>
+    <button id="deleteShelterBtn">Delete Selected</button>
+
+    <div id="capacityTable"></div>
+    <button id="seedBtn">Seed Default Shelters</button>
+  </div>
+</div>
+
+<!-- 👮 Officials Panel -->
+<div id="officialPanel">
+  <h3>Officials Login</h3>
+  <input type="text" id="officialUser" placeholder="Official email">
+  <input type="password" id="officialPass" placeholder="Password">
+  <button id="officialLoginBtn">Login</button>
+  <button id="officialLogoutBtn" style="display:none;">Logout</button>
+
+  <div id="updateForm" style="display:none;">
+    <h4>Update Shelter Info</h4>
+    <select id="updateShelterSelect"><option value="">-- Select Shelter --</option></select>
+    <input type="number" id="updateOccupancy" placeholder="Current Occupancy" min="0">
+    <select id="updateStatusSelect">
+      <option value="">-- Select Status --</option>
+      <option value="available">✅ Available</option>
+      <option value="full">❌ Full</option>
+    </select>
+    <button id="saveStatusBtn">Save Update</button>
+  </div>
+</div>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+<script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+<script>
+/* Firebase config */
+const firebaseConfig = {
+  apiKey: "AIzaSyDnELgmIyXPVQAk69rz9db1m4fV64QIQeE",
+  authDomain: "shelter-dcdab.firebaseapp.com",
+  projectId: "shelter-dcdab",
+  storageBucket: "shelter-dcdab.appspot.com",
+  messagingSenderId: "192730355402",
+  appId: "1:192730355402:web:73a661300ab80e6db4c633",
+  measurementId: "G-TSKM5XS577"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+/* Map setup */
+let shelterMarkersArr = [];
+const map = L.map('map').setView([16.8827,121.5945],14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+
+/* User location */
+let userMarker=null, routingControl=null;
+let watchId = null;
+document.getElementById('controlToggle').onclick = ()=>{
+  const p=document.getElementById('controlPanel');
+  p.style.display=p.style.display==='none'?'block':'none';
+};
+document.getElementById('locateBtn').onclick = function(){
+  const btn=this;
+  if(!navigator.geolocation){alert("Geolocation not supported.");return;}
+  if(watchId!==null){
+    navigator.geolocation.clearWatch(watchId);watchId=null;
+    btn.textContent="Show My Location";return;
+  }
+  watchId=navigator.geolocation.watchPosition(
+    pos=>{
+      const latlng=[pos.coords.latitude,pos.coords.longitude];
+      if(userMarker) userMarker.setLatLng(latlng);
+      else userMarker=L.marker(latlng).addTo(map);
+      userMarker.bindPopup("📍 You are here").openPopup();
+      map.setView(latlng,16);
+    },
+    err=>{alert("Location error:"+err.message);watchId=null;btn.textContent="Show My Location";},
+    {enableHighAccuracy:true,maximumAge:0,timeout:10000}
+  );
+  btn.textContent="Stop Tracking";
+};
+
+/* ✅ Realtime Routing */
+function startRealtimeRouting(toCoords, status){
+  if(status==="full"){alert("❌ This shelter is FULL. Choose another.");return;}
+  if(routingControl){ map.removeControl(routingControl); routingControl=null; }
+  routingControl=L.Routing.control({
+    waypoints:[ userMarker.getLatLng(), L.latLng(toCoords[0],toCoords[1]) ],
+    routeWhileDragging:true, show:false, addWaypoints:false,
+    draggableWaypoints:false, fitSelectedRoutes:true,
+    createMarker:()=>null
+  }).addTo(map);
+}
+
+/* Firestore realtime listener */
+function renderSheltersFromSnapshot(snapshot){
+  shelterMarkersArr.forEach(m=>map.removeLayer(m));
+  shelterMarkersArr=[];
+  const destDropdown=document.getElementById('destination');
+  destDropdown.innerHTML='<option value="">Select Shelter</option>';
+
+  snapshot.forEach(doc=>{
+    const s=doc.data();
+    let lat=0, lng=0;
+    if(Array.isArray(s.coords)){lat=Number(s.coords[0]); lng=Number(s.coords[1]);}
+    else if(typeof s.coords==="string" && s.coords.includes(",")){
+      const parts=s.coords.split(",").map(Number);
+      lat=parts[0]; lng=parts[1];
+    }
+    if(!lat||!lng) return;
+
+    let color="blue";
+    if(s.status==="full") color="gray";
+    if(s.status==="available") color="green";
+
+    const marker=L.circleMarker([lat,lng],{
+      radius:8,
+      color:color,
+      fillColor:color,
+      fillOpacity:0.8
+    }).addTo(map);
+
+    marker.bindPopup(`
+      <b>${s.name}</b><br>
+      Capacity: ${s.capacity||'N/A'}<br>
+      Occupancy: ${s.currentOccupancy||0}<br>
+      Status: <b style="color:${s.status==='full'?'red':'green'}">${s.status||'available'}</b>
+    `);
+
+    shelterMarkersArr.push(marker);
+
+    const opt=document.createElement('option');
+    opt.value=doc.id; opt.textContent=s.name; destDropdown.appendChild(opt);
+
+    marker.on("click", ()=>{
+      if(!userMarker){alert("📍 Set your location first.");return;}
+      startRealtimeRouting([lat,lng], s.status);
+    });
+  });
+}
+db.collection('shelters').onSnapshot(renderSheltersFromSnapshot);
+
+/* Route button */
+document.getElementById('routeBtn').onclick=()=>{
+  const sel=document.getElementById('destination').value;
+  if(!sel||!userMarker){alert("Select shelter and set your location first.");return;}
+  db.collection('shelters').doc(sel).get().then(doc=>{
+    if(!doc.exists) return;
+    const s=doc.data();
+    startRealtimeRouting(s.coords, s.status);
+  });
+};
+
+/* 👮 Officials Auth */
+document.getElementById('officialLoginBtn').onclick=async()=>{
+  const email=document.getElementById('officialUser').value;
+  const pass=document.getElementById('officialPass').value;
+  if(!email||!pass){alert("Enter credentials.");return;}
+  try{
+    await auth.signInWithEmailAndPassword(email,pass);
+    document.getElementById('officialLoginBtn').style.display="none";
+    document.getElementById('officialLogoutBtn').style.display="block";
+    document.getElementById('updateForm').style.display="block";
+    alert("✅ Logged in as official: "+email);
+
+    const sel=document.getElementById('updateShelterSelect');
+    sel.innerHTML='<option value="">-- Select Shelter --</option>';
+    const snapshot=await db.collection('shelters').get();
+    snapshot.forEach(doc=>{
+      const s=doc.data();
+      const opt=document.createElement('option');
+      opt.value=doc.id;
+      opt.textContent=s.name;
+      sel.appendChild(opt);
+    });
+
+    sel.onchange=async()=>{
+      if(!sel.value) return;
+      const doc=await db.collection('shelters').doc(sel.value).get();
+      if(doc.exists){
+        const data=doc.data();
+        document.getElementById('updateOccupancy').value=data.currentOccupancy||0;
+        document.getElementById('updateStatusSelect').value=data.status||"available";
+      }
+    };
+  }catch(e){alert("❌ Login failed:"+e.message);}
+};
+
+document.getElementById('officialLogoutBtn').onclick=async()=>{
+  await auth.signOut();
+  document.getElementById('officialLoginBtn').style.display="block";
+  document.getElementById('officialLogoutBtn').style.display="none";
+  document.getElementById('updateForm').style.display="none";
+  alert("👋 Logged out (official)");
+};
+
+document.getElementById('saveStatusBtn').onclick=async()=>{
+  const shelterId=document.getElementById('updateShelterSelect').value;
+  const occupancy=parseInt(document.getElementById('updateOccupancy').value)||0;
+  let status=document.getElementById('updateStatusSelect').value;
+
+  if(!shelterId){alert("Select shelter first.");return;}
+
+  try{
+    const doc=await db.collection('shelters').doc(shelterId).get();
+    if(!doc.exists){alert("Shelter not found.");return;}
+    const data=doc.data();
+    const maxCap=parseInt(data.capacity)||0;
+
+    if(maxCap>0){
+      if(occupancy >= maxCap) status="full";
+      else if(status==="") status="available";
+    }
+
+    await db.collection('shelters').doc(shelterId).update({
+      currentOccupancy:occupancy,
+      status
+    });
+
+    alert("✅ Shelter updated!");
+  }catch(e){alert("❌ Error:"+e.message);}
+};
+
+/* 🔑 ADMIN AUTH */
+document.getElementById('loginBtn').onclick = async () => {
+  const email = document.getElementById('adminUser').value;
+  const pass = document.getElementById('adminPass').value;
+  if (!email || !pass) { alert("Enter admin credentials."); return; }
+  try {
+    await auth.signInWithEmailAndPassword(email, pass);
+    document.getElementById('loginBtn').style.display = "none";
+    document.getElementById('logoutBtn').style.display = "block";
+    document.getElementById('shelterForm').style.display = "block";
+    alert("✅ Logged in as Admin: " + email);
+
+    const sel = document.getElementById('deleteShelterSelect');
+    sel.innerHTML = '<option value="">-- Select Shelter --</option>';
+    const snapshot = await db.collection('shelters').get();
+    snapshot.forEach(doc => {
+      const s = doc.data();
+      const opt = document.createElement('option');
+      opt.value = doc.id;
+      opt.textContent = s.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    alert("❌ Admin login failed: " + e.message);
+  }
+};
+
+document.getElementById('logoutBtn').onclick = async () => {
+  await auth.signOut();
+  document.getElementById('loginBtn').style.display = "block";
+  document.getElementById('logoutBtn').style.display = "none";
+  document.getElementById('shelterForm').style.display = "none";
+  alert("👋 Logged out (admin)");
+};
+
+/* Add / Update Shelter */
+document.getElementById('addShelterBtn').onclick = async () => {
+  const name = document.getElementById('shelterName').value;
+  const lat = parseFloat(document.getElementById('shelterLat').value);
+  const lng = parseFloat(document.getElementById('shelterLng').value);
+  const cap = document.getElementById('shelterCap').value;
+  if (!name || isNaN(lat) || isNaN(lng) || !cap) {
+    alert("Fill all shelter fields."); return;
+  }
+  try {
+    await db.collection('shelters').doc(name).set({
+      name, coords: [lat, lng], capacity: cap,
+      currentOccupancy: 0, status: "available"
+    });
+    alert("✅ Shelter added/updated!");
+  } catch (e) { alert("❌ Error: " + e.message); }
+};
+
+/* Delete Shelter */
+document.getElementById('deleteShelterBtn').onclick = async () => {
+  const sel = document.getElementById('deleteShelterSelect').value;
+  if (!sel) { alert("Select shelter to delete."); return; }
+  try {
+    await db.collection('shelters').doc(sel).delete();
+    alert("🗑 Shelter deleted.");
+  } catch (e) { alert("❌ Error: " + e.message); }
+};
+
+/* Shortcuts */
+document.addEventListener("keydown", function(e){
+  if(e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a"){
+    const panel=document.getElementById("adminPanel");
+    panel.style.display=(panel.style.display==="none"||panel.style.display==="")?"block":"none";
+  }
+  if(e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "u"){
+    const panel=document.getElementById("officialPanel");
+    panel.style.display=(panel.style.display==="none"||panel.style.display==="")?"block":"none";
+  }
+});
+</script>
+
+<!-- ✅ Added Service Worker Registration -->
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js")
+    .then(() => console.log("✅ Service Worker registered"))
+    .catch(err => console.error("❌ Service Worker failed:", err));
+}
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
